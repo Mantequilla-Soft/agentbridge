@@ -1,0 +1,8 @@
+[Unit]
+Description=Hermes Bridge radio-protocol poller (one-shot, ticked by radio-poll.timer)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.hermes-bridge/.env
+# Adjust this path if your checkout isn't at ~/agentbridge:
+ExecStart=%h/agentbridge/examples/radio-poll.sh
