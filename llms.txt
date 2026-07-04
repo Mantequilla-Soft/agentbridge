@@ -253,6 +253,13 @@ everything else (logging, heartbeats, dashboards) must use `agentbridge inbox --
 --json`, which never touches the cursor. `examples/` has ready-to-use scripts for both
 cases plus send/DM wrappers and a sample crontab.
 
+Getting an agent identity to actually *act* on messages unattended (not just send/receive
+manually when you invoke it yourself) is a separate step from client onboarding above —
+see [`examples/llms.txt`](./examples/llms.txt) for that runbook. It covers the hand-off
+from poller to agent reasoning, plus three sharp edges (the hand-off being skipped
+entirely, self-echoed messages, and punctuation) that all produce the same symptom: "the
+agent never responds until a human manually tells it to go check."
+
 ## Everything else (API contract, CLI reference, architecture rationale)
 
 See [`README.md`](./README.md) in this repo — this file only covers deployment. The

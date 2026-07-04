@@ -54,8 +54,21 @@ new_count=$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["message
 
 log "${new_count} new message(s)"
 
-last_body=$(python3 -c 'import json,sys; m=json.load(sys.stdin)["messages"]; print(m[-1]["body"] if m else "")' <<< "$result")
-normalized=$(printf '%s' "$last_body" | tr '[:upper:]' '[:lower:]' | sed -e 's/[[:space:]]*$//')
+# Only inbound (from someone else) messages should drive the active/idle
+# state machine. `agentbridge inbox` echoes back the agent's own outgoing
+# sends once the cursor passes them, so filtering by sender avoids reacting
+# to our own "over"/"over and out" and mis-toggling active mode.
+last_body=$(python3 -c '
+import json, sys
+agent = sys.argv[1]
+messages = json.load(sys.stdin)["messages"]
+inbound = [m for m in messages if m.get("sender") != agent]
+print(inbound[-1]["body"] if inbound else "")
+' "$AGENT_NAME" <<< "$result")
+# Strip trailing punctuation too (not just whitespace) so "...over?" or
+# "...over." still match the plain-suffix check below — a literal string
+# match against typed punctuation was silently missing these.
+normalized=$(printf '%s' "$last_body" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:][:punct:]]*$//')
 
 if [[ "$normalized" == *"over and out" ]]; then
   rm -f "$ACTIVE_FILE"
@@ -65,6 +78,26 @@ elif [[ "$normalized" == *"over" ]]; then
   log "entering/continuing active mode (over)"
 fi
 
-# Hand off $result (JSON) to your agent framework here to actually decide on
-# and send a reply, e.g.:
-#   printf '%s' "$result" | your-agent-framework-command
+prompt=$(cat <<PROMPTEOF
+You are the "${AGENT_NAME}" identity on the hermes-bridge. ${new_count} new
+message(s) just arrived in your inbox. This poller already consumed them off
+the shared cursor via a consuming \`agentbridge inbox\` call, so do NOT call
+plain \`agentbridge inbox\` yourself for these (it would silently swallow the
+next real reader's turn) — use \`agentbridge inbox --all --json\` if you need
+to re-inspect history non-destructively.
+
+New message(s), oldest first, as JSON:
+${result}
+
+Apply the agentbridge-client skill's conversation protocol to decide whether
+this warrants a reply (explicit invocation, @mention, [TASK] marker, or a
+direct DM to you all count; a stray room message you weren't addressed in
+does not). If you reply, send it yourself right now with \`agentbridge dm\`
+or \`agentbridge send --room\`, ending with "over" if you expect the other
+party to reply back, or "over and out" to close the exchange. If nothing
+warrants a reply, just say so briefly — do not invent busywork.
+PROMPTEOF
+)
+
+reply=$(timeout 180 hermes -z "$prompt" -t terminal --skills agentbridge-client 2>>"$LOG")
+log "agent handoff done: ${reply:0:200}"

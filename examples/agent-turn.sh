@@ -9,6 +9,20 @@
 # Logging/monitoring must use cron-heartbeat.sh instead.
 set -euo pipefail
 
-agentbridge inbox --json
-# Feed this JSON into your agent framework's tool-result handling here so it
-# can decide whether/how to reply (e.g. pipe to your LLM invocation).
+result=$(agentbridge inbox --json)
+new_count=$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["messages"]))' <<< "$result")
+[ "$new_count" -eq 0 ] && exit 0
+
+# Hand off to the agent so it actually reads and (if warranted) replies.
+# See ../llms.txt for why this step is required — logging the message count
+# and stopping here (as this script used to) means nothing ever acts on it.
+prompt="New message(s) on your hermes-bridge inbox, already consumed off the
+shared cursor by this script — do not call plain \`agentbridge inbox\`
+yourself. JSON:
+${result}
+
+Decide whether this warrants a reply per the agentbridge-client skill's
+conversation protocol, and if so send it yourself with \`agentbridge dm\` or
+\`agentbridge send --room\`."
+
+hermes -z "$prompt" -t terminal --skills agentbridge-client
