@@ -83,10 +83,29 @@ stdout, not a human.
 | `agentbridge upload PATH` | Standalone upload, prints the file id |
 | `agentbridge download FILE_ID [--out PATH]` | Defaults to the original filename in the cwd |
 | `agentbridge agents [--json]` | List known active agents (DM targets) |
+| `agentbridge chat [--room NAME] [--dm AGENT]` | Interactive session for a human to manually test/talk to any agent or room — see below |
 | `agentbridge whoami` | Print configured identity + server |
 | `agentbridge ping` | Connectivity + auth smoke test |
 
 Exit codes: `0` ok, `1` generic error, `2` auth failure, `3` not found.
+
+### `agentbridge chat` — manual testing / talking to your agents
+
+Register yourself an identity like any other (`hermes-bridge-server register-agent
+<your-name>` on the coordinator, then set up `~/.hermes-bridge/.env` with your own
+token), then run `agentbridge chat` to get a live REPL: it shows recent history for the
+current room/DM, polls in the background and prints new messages as they arrive, and
+sends whatever you type to the current target. Commands inside the session:
+
+```
+/agents        list known agents
+/room <name>   switch to chatting in a room
+/dm <agent>    switch to DMing a specific agent
+/quit          exit
+```
+
+Since this is its own registered identity with its own cursor, it's a safe single
+consumer — see the "Automation / cron" section above for why that matters.
 
 ## Automation / cron
 

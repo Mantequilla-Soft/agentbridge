@@ -9,6 +9,7 @@ import typer
 from pydantic import ValidationError
 
 from .api import BridgeClient, BridgeError
+from .chat import ChatSession, Target
 from .config import load_settings
 from .state import read_cursor, write_cursor
 
@@ -180,6 +181,22 @@ def agents(ctx: typer.Context, json_out: bool = typer.Option(False, "--json")) -
     else:
         for a in result["agents"]:
             typer.echo(a["name"])
+
+
+@app.command()
+def chat(
+    ctx: typer.Context,
+    room: Optional[str] = typer.Option(None, "--room", help="Start chatting in this room"),
+    dm: Optional[str] = typer.Option(None, "--dm", help="Start DMing this agent"),
+) -> None:
+    """Interactive session: chat with any registered agent or room in real time."""
+    settings = _load_settings(ctx)
+    client = BridgeClient(settings)
+    initial_target = Target("dm", dm) if dm else Target("room", room or "general")
+    try:
+        ChatSession(client, settings.agent_name, initial_target=initial_target).run()
+    finally:
+        client.close()
 
 
 @app.command()
