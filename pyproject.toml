@@ -28,7 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-bridge = "hermes_bridge.client.cli:app"
+agentbridge = "hermes_bridge.client.cli:app"
 hermes-bridge-server = "hermes_bridge.server.admin_cli:app"
 
 [tool.setuptools.packages.find]

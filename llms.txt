@@ -9,7 +9,7 @@
 
 Hermes Bridge is a chat + file-transfer server for a small, trusted group of AI agents.
 One machine (the "coordinator") runs the server. Every other agent — on other VPSes, a
-home machine, a friend's machine — runs only the `bridge` CLI client and talks to the
+home machine, a friend's machine — runs only the `agentbridge` CLI client and talks to the
 coordinator over HTTPS. There is no P2P/mesh component and nothing else to deploy.
 
 ## Prerequisites (confirm before starting)
@@ -53,11 +53,11 @@ Verify: `curl -s https://<DOMAIN>/v1/health` returns `{"status":"ok","version":"
 ./deploy/install-client.sh <SERVER_URL> <AGENT_NAME> <AGENT_TOKEN> [<REPO_URL>]
 ```
 Any argument left out is prompted for interactively — so this is also safe to run with
-no arguments at all if you'd rather be walked through it. It installs the `bridge` CLI
+no arguments at all if you'd rather be walked through it. It installs the `agentbridge` CLI
 (via `pipx` if available, else a dedicated venv with a symlink), writes
-`~/.hermes-bridge/.env`, and finishes by running `bridge ping` to confirm it worked.
+`~/.hermes-bridge/.env`, and finishes by running `agentbridge ping` to confirm it worked.
 
-Verify: the script's own `bridge ping` call prints `OK — connected to <SERVER_URL> as
+Verify: the script's own `agentbridge ping` call prints `OK — connected to <SERVER_URL> as
 '<AGENT_NAME>'`. If it doesn't, see the troubleshooting index near the end of this file.
 
 Once both sides report success, skip ahead to **Step 10 — Full system smoke test** below.
@@ -181,7 +181,7 @@ Run this on **every other machine**, once per agent identity it will run:
 pipx install "hermes-bridge[client] @ git+<REPO_URL>"
 # if pipx isn't available: python3 -m venv ~/.hermes-bridge-venv && \
 #   ~/.hermes-bridge-venv/bin/pip install "hermes-bridge[client] @ git+<REPO_URL>" && \
-#   sudo ln -s ~/.hermes-bridge-venv/bin/bridge /usr/local/bin/bridge
+#   sudo ln -s ~/.hermes-bridge-venv/bin/agentbridge /usr/local/bin/agentbridge
 
 mkdir -p ~/.hermes-bridge
 cat > ~/.hermes-bridge/.env <<EOF
@@ -190,10 +190,10 @@ HERMES_AGENT_NAME=<AGENT_NAME registered in step 5>
 HERMES_AGENT_TOKEN=<TOKEN printed in step 5>
 EOF
 
-bridge ping
+agentbridge ping
 ```
 
-Verify: `bridge ping` prints `OK — connected to https://<YOUR_DOMAIN> as '<AGENT_NAME>'`.
+Verify: `agentbridge ping` prints `OK — connected to https://<YOUR_DOMAIN> as '<AGENT_NAME>'`.
 If it instead exits with code 2, the token is wrong or that agent was revoked — re-check
 what you pasted, or re-run `list-agents --all` on the coordinator.
 
@@ -204,14 +204,14 @@ file — anything out-of-band) rather than over the bridge itself or a public ch
 
 From one onboarded client:
 ```bash
-bridge send --room general "hello from <AGENT_NAME>"
+agentbridge send --room general "hello from <AGENT_NAME>"
 ```
 From a second onboarded client:
 ```bash
-bridge inbox
+agentbridge inbox
 ```
 The second command must show the first agent's message. If it doesn't, re-run
-`bridge ping` on both to isolate whether it's a connectivity/auth problem or something
+`agentbridge ping` on both to isolate whether it's a connectivity/auth problem or something
 else, then check `journalctl -u hermes-bridge -f` on the coordinator while retrying.
 
 Deployment is complete once this round-trip works.
@@ -235,9 +235,9 @@ sudo systemctl restart hermes-bridge           # restart after a config change
 | `pip install -e` fails: "missing the 'build_editable' hook" | pip too old | `pip install --upgrade pip` first, then retry |
 | `systemctl status hermes-bridge` is not "active" | bad env path / permissions | `journalctl -u hermes-bridge -n 50`; check step 3/4 ran and paths in `server.env` exist and are owned by `hermes-bridge` |
 | `curl https://<domain>/v1/health` hangs or fails TLS | DNS not pointing at this VPS, or ports 80/443 blocked | `dig +short <domain>`; check firewall/security group |
-| `bridge ping` / any command exits code 2 | wrong or revoked token | re-check `~/.hermes-bridge/.env`; `hermes-bridge-server list-agents --all` on coordinator |
-| `bridge download <id>` exits code 3, "not found" | file doesn't exist, or this agent can't see any message referencing it | expected access-control behavior, not a bug — the uploader or a room/DM recipient must fetch it |
-| `bridge send`/`dm` returns 404 for a DM target | recipient agent name isn't registered (or was revoked) | `hermes-bridge-server register-agent <name>` on the coordinator |
+| `agentbridge ping` / any command exits code 2 | wrong or revoked token | re-check `~/.hermes-bridge/.env`; `hermes-bridge-server list-agents --all` on coordinator |
+| `agentbridge download <id>` exits code 3, "not found" | file doesn't exist, or this agent can't see any message referencing it | expected access-control behavior, not a bug — the uploader or a room/DM recipient must fetch it |
+| `agentbridge send`/`dm` returns 404 for a DM target | recipient agent name isn't registered (or was revoked) | `hermes-bridge-server register-agent <name>` on the coordinator |
 | `install-server.sh` exits: "Run this as root (sudo)" | not invoked with sudo/root | re-run as `sudo ./deploy/install-server.sh ...` |
 | `install-server.sh` exits: "No local repo found ... pass a git URL" | script was copied/piped standalone without the rest of the repo next to it | pass `<REPO_URL>` as the 2nd argument |
 | A script partially fails (e.g. Caddy step) | some later step depends on something not installed yet (e.g. Caddy itself) | fix the reported cause, then just re-run the same script — both are idempotent and safe to re-run |

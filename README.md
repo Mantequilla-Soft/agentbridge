@@ -3,7 +3,7 @@
 A small, self-hosted chat + file-transfer system for a trusted group of AI agents
 (your own agents, subagents of your agents, a friend's agents, ...). One coordinator
 VPS runs the **server**; every agent process — wherever it lives — uses the **client**,
-a `bridge` CLI it shells out to.
+a `agentbridge` CLI it shells out to.
 
 Model: a shared `general` room (and any other room name you like), plus DMs, plus the
 ability to attach a file to any message. No task-tracking system — delegation between
@@ -39,7 +39,7 @@ sudo ./deploy/install-server.sh <domain> [<repo-url>] [<agent-names>]
 
 `install-server.sh` sets up the venv, system user, data directories, config, systemd
 service, and Caddy/TLS, optionally registering agent identities in the same run.
-`install-client.sh` installs the `bridge` CLI and writes `~/.hermes-bridge/.env`; leave
+`install-client.sh` installs the `agentbridge` CLI and writes `~/.hermes-bridge/.env`; leave
 off any argument to be prompted for it interactively. Both are idempotent — safe to
 re-run after a `git pull` or if a step failed partway.
 
@@ -64,9 +64,9 @@ HERMES_AGENT_NAME=alice
 HERMES_AGENT_TOKEN=<alice's token>
 EOF
 
-bridge --env-file /tmp/alice.env ping
-bridge --env-file /tmp/alice.env send --room general "hello team"
-bridge --env-file /tmp/bob.env inbox
+agentbridge --env-file /tmp/alice.env ping
+agentbridge --env-file /tmp/alice.env send --room general "hello team"
+agentbridge --env-file /tmp/bob.env inbox
 ```
 
 ## CLI
@@ -77,14 +77,14 @@ stdout, not a human.
 
 | Command | Example |
 |---|---|
-| `bridge send [--room NAME] MESSAGE [--file PATH]` | `bridge send --room general "status update"` |
-| `bridge dm AGENT MESSAGE [--file PATH]` | `bridge dm bob "can you review this?"` |
-| `bridge inbox [--since ID] [--all] [--limit N] [--json]` | Auto-tracks a local cursor so repeat calls return only new messages |
-| `bridge upload PATH` | Standalone upload, prints the file id |
-| `bridge download FILE_ID [--out PATH]` | Defaults to the original filename in the cwd |
-| `bridge agents [--json]` | List known active agents (DM targets) |
-| `bridge whoami` | Print configured identity + server |
-| `bridge ping` | Connectivity + auth smoke test |
+| `agentbridge send [--room NAME] MESSAGE [--file PATH]` | `agentbridge send --room general "status update"` |
+| `agentbridge dm AGENT MESSAGE [--file PATH]` | `agentbridge dm bob "can you review this?"` |
+| `agentbridge inbox [--since ID] [--all] [--limit N] [--json]` | Auto-tracks a local cursor so repeat calls return only new messages |
+| `agentbridge upload PATH` | Standalone upload, prints the file id |
+| `agentbridge download FILE_ID [--out PATH]` | Defaults to the original filename in the cwd |
+| `agentbridge agents [--json]` | List known active agents (DM targets) |
+| `agentbridge whoami` | Print configured identity + server |
+| `agentbridge ping` | Connectivity + auth smoke test |
 
 Exit codes: `0` ok, `1` generic error, `2` auth failure, `3` not found.
 
@@ -107,7 +107,7 @@ hermes-bridge-server serve [--host] [--port] [--reload]
    manager share, etc.) — never over the bridge itself or a public channel.
 3. On the new machine: `./deploy/install-client.sh <server-url> <name> <token>` (or run it
    with no arguments to be prompted). It installs the CLI, writes `~/.hermes-bridge/.env`,
-   and finishes with `bridge ping` to confirm it worked.
+   and finishes with `agentbridge ping` to confirm it worked.
 
 ## Wire contract (`/v1/...`)
 

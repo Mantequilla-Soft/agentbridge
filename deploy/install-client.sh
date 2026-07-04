@@ -7,9 +7,9 @@
 # Or as a one-liner on a fresh machine with nothing cloned yet:
 #   curl -fsSL <raw-url-of-this-script> | bash -s -- <server-url> <agent-name> <agent-token> <repo-url>
 #
-# Any argument left out is prompted for interactively. Installs the `bridge` CLI
+# Any argument left out is prompted for interactively. Installs the `agentbridge` CLI
 # (via pipx if available, else a dedicated venv), writes ~/.hermes-bridge/.env,
-# and verifies the connection with `bridge ping`.
+# and verifies the connection with `agentbridge ping`.
 set -euo pipefail
 
 SERVER_URL="${1:-}"
@@ -28,9 +28,9 @@ prompt SERVER_URL "Coordinator URL (e.g. https://bridge.example.com)"
 prompt AGENT_NAME "This agent's name (as registered on the coordinator)"
 prompt AGENT_TOKEN "This agent's token (printed once at registration on the coordinator)"
 
-echo "==> Installing the bridge CLI"
-if command -v bridge >/dev/null 2>&1; then
-  echo "    'bridge' is already on PATH, skipping install"
+echo "==> Installing the agentbridge CLI"
+if command -v agentbridge >/dev/null 2>&1; then
+  echo "    'agentbridge' is already on PATH, skipping install"
 else
   prompt REPO_URL "Git URL to install hermes-bridge from"
   if command -v pipx >/dev/null 2>&1; then
@@ -41,7 +41,7 @@ else
     "$HOME/.hermes-bridge-venv/bin/pip" install --upgrade pip -q
     "$HOME/.hermes-bridge-venv/bin/pip" install -q "hermes-bridge[client] @ git+${REPO_URL}"
     mkdir -p "$HOME/.local/bin"
-    ln -sf "$HOME/.hermes-bridge-venv/bin/bridge" "$HOME/.local/bin/bridge"
+    ln -sf "$HOME/.hermes-bridge-venv/bin/agentbridge" "$HOME/.local/bin/agentbridge"
     case ":$PATH:" in
       *":$HOME/.local/bin:"*) ;;
       *) echo "    NOTE: add $HOME/.local/bin to your PATH (not currently on it)" ;;
@@ -49,7 +49,7 @@ else
   fi
 fi
 
-BRIDGE_BIN="$(command -v bridge || echo "$HOME/.local/bin/bridge")"
+AGENTBRIDGE_BIN="$(command -v agentbridge || echo "$HOME/.local/bin/agentbridge")"
 
 echo "==> Writing ~/.hermes-bridge/.env"
 mkdir -p "$HOME/.hermes-bridge"
@@ -61,13 +61,13 @@ EOF
 chmod 600 "$HOME/.hermes-bridge/.env"
 
 echo "==> Verifying connection"
-"$BRIDGE_BIN" ping
+"$AGENTBRIDGE_BIN" ping
 
 cat <<EOF
 
 ==> Done. This machine is registered as '${AGENT_NAME}' against ${SERVER_URL}.
 
 Try:
-  bridge send --room general "hello from ${AGENT_NAME}"
-  bridge inbox
+  agentbridge send --room general "hello from ${AGENT_NAME}"
+  agentbridge inbox
 EOF
