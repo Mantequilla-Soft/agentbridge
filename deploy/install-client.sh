@@ -38,8 +38,9 @@ else
   else
     echo "    pipx not found — using a dedicated venv at ~/.hermes-bridge-venv instead"
     python3 -m venv "$HOME/.hermes-bridge-venv"
-    "$HOME/.hermes-bridge-venv/bin/pip" install --upgrade pip -q
-    "$HOME/.hermes-bridge-venv/bin/pip" install -q "hermes-bridge[client] @ git+${REPO_URL}"
+    "$HOME/.hermes-bridge-venv/bin/pip" install --upgrade pip
+    echo "    Installing dependencies (this can take a minute)..."
+    "$HOME/.hermes-bridge-venv/bin/pip" install "hermes-bridge[client] @ git+${REPO_URL}"
     mkdir -p "$HOME/.local/bin"
     ln -sf "$HOME/.hermes-bridge-venv/bin/agentbridge" "$HOME/.local/bin/agentbridge"
     case ":$PATH:" in

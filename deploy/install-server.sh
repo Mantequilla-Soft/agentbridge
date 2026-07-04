@@ -64,12 +64,12 @@ if ! python3 -m venv --help >/dev/null 2>&1; then
   fi
 fi
 
-echo "==> Creating virtualenv and installing hermes-bridge[server]"
+echo "==> Creating virtualenv and installing hermes-bridge[server] (this can take a minute)"
 [ -d .venv ] || python3 -m venv .venv
 # Older/system pip can fail with "missing the 'build_editable' hook" on an editable
 # install of this package — upgrading pip first avoids that.
-./.venv/bin/pip install --upgrade pip -q
-./.venv/bin/pip install -e ".[server]" -q
+./.venv/bin/pip install --upgrade pip
+./.venv/bin/pip install -e ".[server]"
 
 echo "==> Creating the hermes-bridge system user"
 id hermes-bridge >/dev/null 2>&1 || useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin hermes-bridge
