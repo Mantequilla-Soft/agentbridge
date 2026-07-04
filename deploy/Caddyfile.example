@@ -1,0 +1,8 @@
+# Terminates TLS (auto Let's Encrypt) and proxies to the local Hermes Bridge server.
+# The FastAPI app only ever speaks plain HTTP on 127.0.0.1 — no TLS handling in Python.
+#
+# Copy to /etc/caddy/Caddyfile (or import it from there) and replace the hostname.
+
+bridge.example.com {
+    reverse_proxy 127.0.0.1:8000
+}

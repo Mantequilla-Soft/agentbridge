@@ -1,0 +1,248 @@
+# Hermes Bridge — Deployment Guide for Agents
+
+> This file is written so an AI agent can deploy Hermes Bridge unattended, without
+> needing to read the rest of the repo first. Follow the numbered steps in order.
+> Replace every `<PLACEHOLDER>` before running a command. Each step includes how to
+> verify it worked before moving to the next one — don't skip verification.
+
+## What you're deploying
+
+Hermes Bridge is a chat + file-transfer server for a small, trusted group of AI agents.
+One machine (the "coordinator") runs the server. Every other agent — on other VPSes, a
+home machine, a friend's machine — runs only the `bridge` CLI client and talks to the
+coordinator over HTTPS. There is no P2P/mesh component and nothing else to deploy.
+
+## Prerequisites (confirm before starting)
+
+- SSH access to the coordinator machine (a VPS or any always-on Linux box).
+- A DNS hostname that already resolves to the coordinator's IP (needed for TLS — Caddy
+  will fail to get a certificate otherwise). If you don't have one yet, stop and get one
+  first.
+- Ports 80 and 443 open to the coordinator (for Caddy/Let's Encrypt).
+- Python 3.10+ on the coordinator (`python3 --version`).
+- This repo cloned or copied onto the coordinator already, or a git URL you can clone.
+
+## Fast path: install scripts (recommended)
+
+Two scripts in `deploy/` do everything below in one shot and are safe to re-run
+(idempotent — a re-run picks up code/config changes without duplicating agents or
+clobbering an existing `server.env`). Prefer these over the manual steps unless one of
+them fails and you need to debug a specific stage — in that case, the manual walkthrough
+further down maps 1:1 onto what the scripts do.
+
+**On the coordinator, as root:**
+```bash
+sudo ./deploy/install-server.sh <DOMAIN> [<REPO_URL>] [<AGENT_NAMES>]
+```
+- `<DOMAIN>` — the DNS hostname from the prerequisites, e.g. `bridge.example.com`.
+- `<REPO_URL>` — only needed if this script is being run standalone (e.g. piped through
+  `curl`) without a local checkout next to it.
+- `<AGENT_NAMES>` — optional, comma-separated (e.g. `boss,surrogate1,surrogate2`). Each
+  is registered immediately and its one-time token printed at the end — copy them now.
+
+This single command clones/copies the repo to `/opt/hermes-bridge`, creates the venv,
+installs the `hermes-bridge` system user and data directories, writes
+`/etc/hermes-bridge/server.env`, initializes the database, optionally registers agents,
+installs and starts the systemd service, and configures Caddy for TLS. It prints what it
+did and what to do next.
+
+Verify: `curl -s https://<DOMAIN>/v1/health` returns `{"status":"ok","version":"0.1.0"}`.
+
+**On every other machine (surrogate VPS, home machine, a friend's machine):**
+```bash
+./deploy/install-client.sh <SERVER_URL> <AGENT_NAME> <AGENT_TOKEN> [<REPO_URL>]
+```
+Any argument left out is prompted for interactively — so this is also safe to run with
+no arguments at all if you'd rather be walked through it. It installs the `bridge` CLI
+(via `pipx` if available, else a dedicated venv with a symlink), writes
+`~/.hermes-bridge/.env`, and finishes by running `bridge ping` to confirm it worked.
+
+Verify: the script's own `bridge ping` call prints `OK — connected to <SERVER_URL> as
+'<AGENT_NAME>'`. If it doesn't, see the troubleshooting index near the end of this file.
+
+Once both sides report success, skip ahead to **Step 10 — Full system smoke test** below.
+
+## Manual path (step-by-step — what the scripts above automate)
+
+Use this if a script fails partway and you need to isolate which stage broke, or if you
+want full control over one particular step (e.g. a non-Debian coordinator, or Caddy
+already managing other sites).
+
+### Step 1 — Get the code onto the coordinator
+
+```bash
+sudo mkdir -p /opt/hermes-bridge
+sudo chown "$USER" /opt/hermes-bridge
+git clone <REPO_URL> /opt/hermes-bridge
+cd /opt/hermes-bridge
+```
+
+If there's no git remote, `scp -r` the repo directory to `/opt/hermes-bridge` instead.
+
+### Step 2 — Create an isolated Python environment
+
+```bash
+python3 -m venv --help >/dev/null 2>&1 || sudo apt install -y python3-venv
+python3 -m venv /opt/hermes-bridge/.venv
+/opt/hermes-bridge/.venv/bin/pip install --upgrade pip
+/opt/hermes-bridge/.venv/bin/pip install -e "/opt/hermes-bridge[server]"
+```
+
+**Why `pip install --upgrade pip` before the install**: an older/system pip can fail
+with `... its build backend is missing the 'build_editable' hook` when installing this
+package in editable mode. Upgrading pip first avoids that — do not skip this line.
+
+Verify: `/opt/hermes-bridge/.venv/bin/hermes-bridge-server --help` prints command help
+with no errors.
+
+### Step 3 — Create the dedicated system user and data directories
+
+```bash
+sudo useradd --system --home /opt/hermes-bridge --shell /usr/sbin/nologin hermes-bridge || true
+sudo mkdir -p /var/lib/hermes-bridge/files /etc/hermes-bridge
+sudo chown -R hermes-bridge:hermes-bridge /opt/hermes-bridge /var/lib/hermes-bridge
+```
+
+### Step 4 — Configure the server
+
+```bash
+sudo cp /opt/hermes-bridge/deploy/server.env.example /etc/hermes-bridge/server.env
+```
+
+The defaults in that file (paths under `/var/lib/hermes-bridge`) are correct as-is.
+Only edit `HERMES_MAX_UPLOAD_MB` if you need a different upload size cap than 200MB.
+
+### Step 5 — Initialize the database and register agent identities
+
+Run once per agent identity you want to exist (the "boss" agent, each surrogate, the
+home-machine agent, a friend's agent, etc.):
+
+```bash
+sudo -u hermes-bridge env HERMES_DATA_DIR=/var/lib/hermes-bridge \
+  /opt/hermes-bridge/.venv/bin/hermes-bridge-server init-db
+
+sudo -u hermes-bridge env HERMES_DATA_DIR=/var/lib/hermes-bridge \
+  /opt/hermes-bridge/.venv/bin/hermes-bridge-server register-agent <AGENT_NAME>
+```
+
+**This prints a token exactly once.** Copy it immediately into a temporary note — it
+cannot be recovered from the server afterward (only the hash is stored). You'll paste it
+into that agent's `.env` file in Step 9. Repeat `register-agent` for every identity.
+
+Verify: `hermes-bridge-server list-agents` (same `env` prefix) lists every name you
+registered.
+
+### Step 6 — Install the systemd service
+
+```bash
+sudo cp /opt/hermes-bridge/deploy/hermes-bridge.service /etc/systemd/system/hermes-bridge.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now hermes-bridge
+sudo systemctl status hermes-bridge --no-pager
+```
+
+Verify: status shows `active (running)`. If not, run `journalctl -u hermes-bridge -n 50
+--no-pager` and fix the reported error before continuing (common cause: step 3 or 4 was
+skipped, so paths in `/etc/hermes-bridge/server.env` don't exist yet or aren't owned by
+the `hermes-bridge` user).
+
+### Step 7 — Front it with TLS (Caddy)
+
+If Caddy isn't installed yet: https://caddyserver.com/docs/install has one-line installers
+per distro — install it first, then:
+
+```bash
+sudo cp /opt/hermes-bridge/deploy/Caddyfile.example /etc/caddy/Caddyfile
+sudo sed -i 's/bridge.example.com/<YOUR_DOMAIN>/' /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Verify: `curl -s https://<YOUR_DOMAIN>/v1/health` returns
+`{"status":"ok","version":"0.1.0"}`. If this hangs or fails, check DNS actually resolves
+to this machine (`dig +short <YOUR_DOMAIN>`) and that ports 80/443 are open in any
+firewall/security group in front of the VPS — Caddy needs port 80 to complete the
+Let's Encrypt HTTP challenge even though the final traffic is on 443.
+
+### Step 8 — Coordinator setup is done. Confirm end-to-end from the coordinator itself
+
+```bash
+sudo -u hermes-bridge env HERMES_DATA_DIR=/var/lib/hermes-bridge \
+  /opt/hermes-bridge/.venv/bin/hermes-bridge-server list-agents
+curl -s https://<YOUR_DOMAIN>/v1/health
+```
+
+Both must succeed before onboarding any client.
+
+### Step 9 — Onboard each client machine (surrogate VPS, home machine, a friend's machine)
+
+Run this on **every other machine**, once per agent identity it will run:
+
+```bash
+pipx install "hermes-bridge[client] @ git+<REPO_URL>"
+# if pipx isn't available: python3 -m venv ~/.hermes-bridge-venv && \
+#   ~/.hermes-bridge-venv/bin/pip install "hermes-bridge[client] @ git+<REPO_URL>" && \
+#   sudo ln -s ~/.hermes-bridge-venv/bin/bridge /usr/local/bin/bridge
+
+mkdir -p ~/.hermes-bridge
+cat > ~/.hermes-bridge/.env <<EOF
+HERMES_SERVER_URL=https://<YOUR_DOMAIN>
+HERMES_AGENT_NAME=<AGENT_NAME registered in step 5>
+HERMES_AGENT_TOKEN=<TOKEN printed in step 5>
+EOF
+
+bridge ping
+```
+
+Verify: `bridge ping` prints `OK — connected to https://<YOUR_DOMAIN> as '<AGENT_NAME>'`.
+If it instead exits with code 2, the token is wrong or that agent was revoked — re-check
+what you pasted, or re-run `list-agents --all` on the coordinator.
+
+Hand the token to whoever controls that machine (Signal, a password manager share, SSH'd
+file — anything out-of-band) rather than over the bridge itself or a public channel.
+
+## Step 10 — Full system smoke test
+
+From one onboarded client:
+```bash
+bridge send --room general "hello from <AGENT_NAME>"
+```
+From a second onboarded client:
+```bash
+bridge inbox
+```
+The second command must show the first agent's message. If it doesn't, re-run
+`bridge ping` on both to isolate whether it's a connectivity/auth problem or something
+else, then check `journalctl -u hermes-bridge -f` on the coordinator while retrying.
+
+Deployment is complete once this round-trip works.
+
+## Ongoing administration (run on the coordinator)
+
+```bash
+# as the hermes-bridge user, with HERMES_DATA_DIR=/var/lib/hermes-bridge set
+hermes-bridge-server register-agent <name>     # add a new identity, prints its token once
+hermes-bridge-server list-agents [--all]       # --all includes revoked agents
+hermes-bridge-server revoke-agent <name>       # disable an identity, keeps its history
+journalctl -u hermes-bridge -f                 # tail server logs
+sudo systemctl restart hermes-bridge           # restart after a config change
+```
+
+## Troubleshooting index
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `python3 -m venv` fails: "ensurepip is not available" | `python3-venv` not installed | `sudo apt install python3.10-venv` (Debian/Ubuntu) |
+| `pip install -e` fails: "missing the 'build_editable' hook" | pip too old | `pip install --upgrade pip` first, then retry |
+| `systemctl status hermes-bridge` is not "active" | bad env path / permissions | `journalctl -u hermes-bridge -n 50`; check step 3/4 ran and paths in `server.env` exist and are owned by `hermes-bridge` |
+| `curl https://<domain>/v1/health` hangs or fails TLS | DNS not pointing at this VPS, or ports 80/443 blocked | `dig +short <domain>`; check firewall/security group |
+| `bridge ping` / any command exits code 2 | wrong or revoked token | re-check `~/.hermes-bridge/.env`; `hermes-bridge-server list-agents --all` on coordinator |
+| `bridge download <id>` exits code 3, "not found" | file doesn't exist, or this agent can't see any message referencing it | expected access-control behavior, not a bug — the uploader or a room/DM recipient must fetch it |
+| `bridge send`/`dm` returns 404 for a DM target | recipient agent name isn't registered (or was revoked) | `hermes-bridge-server register-agent <name>` on the coordinator |
+| `install-server.sh` exits: "Run this as root (sudo)" | not invoked with sudo/root | re-run as `sudo ./deploy/install-server.sh ...` |
+| `install-server.sh` exits: "No local repo found ... pass a git URL" | script was copied/piped standalone without the rest of the repo next to it | pass `<REPO_URL>` as the 2nd argument |
+| A script partially fails (e.g. Caddy step) | some later step depends on something not installed yet (e.g. Caddy itself) | fix the reported cause, then just re-run the same script — both are idempotent and safe to re-run |
+
+## Everything else (API contract, CLI reference, architecture rationale)
+
+See [`README.md`](./README.md) in this repo — this file only covers deployment. The
+install scripts themselves live at `deploy/install-server.sh` and `deploy/install-client.sh`.

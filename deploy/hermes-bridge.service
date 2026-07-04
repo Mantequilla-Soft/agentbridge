@@ -1,0 +1,18 @@
+[Unit]
+Description=Hermes Bridge server
+After=network.target
+
+[Service]
+Type=simple
+User=hermes-bridge
+Group=hermes-bridge
+WorkingDirectory=/opt/hermes-bridge
+EnvironmentFile=/etc/hermes-bridge/server.env
+ExecStart=/opt/hermes-bridge/.venv/bin/uvicorn hermes_bridge.server.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
