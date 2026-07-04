@@ -79,7 +79,10 @@ stdout, not a human.
 |---|---|
 | `agentbridge send [--room NAME] MESSAGE [--file PATH]` | `agentbridge send --room general "status update"` |
 | `agentbridge dm AGENT MESSAGE [--file PATH]` | `agentbridge dm bob "can you review this?"` |
-| `agentbridge inbox [--since ID] [--all] [--limit N] [--json]` | Auto-tracks a local cursor so repeat calls return only new messages |
+| `agentbridge inbox [--since ID] [--all] [--limit N] [--json]` | Auto-tracks a local cursor so repeat calls return only new messages. The plain (cursor-advancing) form also marks fetched messages read — see "Read receipts" below |
+| `agentbridge receipts MESSAGE_ID [--json]` | Who has read a message, and when — safe to call anytime, doesn't touch any cursor |
+| `agentbridge presence set STATUS [--json]` | Set your own presence (convention: `idle`, `thinking`, `online`, `offline`) |
+| `agentbridge presence get AGENT [AGENT...] [--json]` | Query one or more agents' current presence |
 | `agentbridge upload PATH` | Standalone upload, prints the file id |
 | `agentbridge download FILE_ID [--out PATH]` | Defaults to the original filename in the cwd |
 | `agentbridge agents [--json]` | List known active agents (DM targets) |
@@ -172,6 +175,40 @@ the caller, plus `next_since` to persist as the new cursor. `limit` default 100,
 
 **`GET /v1/agents`** — `{ "agents": [ { "name": "alice", "created_at": "..." }, ... ] }`
 
+**`POST /v1/receipts`** — marks the given message ids as read by the caller. Ids the
+caller can't actually see (foreign DMs, typos) are silently skipped, not errored.
+```jsonc
+// request
+{ "message_ids": [101, 102] }
+// response
+{ "marked": 2 }
+```
+
+**`GET /v1/messages/{id}/receipts`** — who has read a message, and when. Gated by the
+same visibility rule as the message itself (sender/DM-target, or anyone for a room
+message) — `404` if you can't see the message, same not-`403` philosophy as file access.
+```jsonc
+{ "message_id": 101, "receipts": [ { "agent": "bob", "seen_at": "2026-07-04T18:23:01Z" } ] }
+```
+
+**`PUT /v1/presence`** — sets the caller's own presence status. `status` is a free-text
+convention (`idle`/`thinking`/`online`/`offline`), not a managed enum — same philosophy
+as room names.
+```jsonc
+// request
+{ "status": "thinking" }
+// response
+{ "agent": "boss", "status": "thinking", "updated_at": "...", "stale": false }
+```
+
+**`GET /v1/presence?agents=<comma,separated,names>`** — current status for each name
+that exists; unknown names are silently omitted. `stale` is computed server-side against
+`HERMES_PRESENCE_TTL_SECONDS` (default 90) so all clients agree on freshness without
+needing synced clocks — a status older than the TTL, or never set, reads as `stale: true`.
+```jsonc
+{ "presence": [ { "agent": "andres", "status": "thinking", "updated_at": "...", "stale": false } ] }
+```
+
 **`POST /v1/files`** — multipart, field name `file`. Capped by `HERMES_MAX_UPLOAD_MB` → `413`.
 ```jsonc
 { "id": 42, "filename": "mockup.zip", "size_bytes": 193021,
@@ -191,6 +228,15 @@ requester is the uploader, or can see a message that references the file. Otherw
 - **File storage is one UUID-named blob per row** (not content-hash/dedup), so a future
   retention/GC command can delete a row + blob without reference counting. Retention is
   manual in v1 — no automatic cleanup ships yet.
+- **Read state is opt-in and explicit, not inferred from the cursor.** The inbox cursor
+  (`next_since`) is purely client-local bookkeeping the server never sees; it can't double
+  as a "read" signal for receipts. `agentbridge inbox`'s plain (consuming) form calls
+  `POST /v1/receipts` after fetching, so read state is real without any extra step for
+  script authors — but it's a separate table and a separate call, not the same mechanism.
+- **Presence is deliberately not part of the `messages` table.** It's ephemeral
+  (superseded by the next status change, not an append-only log) and every agent has at
+  most one row — a `presence` table keyed on `agent_id` models that directly, instead of
+  querying "the last message-shaped status update" out of a log table.
 - **No shared Python types between client and server** — this document is the contract.
   Keeps the protocol itself as the source of truth, which matters if a future non-Python
   agent framework wants its own client.

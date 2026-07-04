@@ -35,42 +35,39 @@ of which touch the shared cursor.
 |---|---|
 | `agent-turn.sh` | The one consuming read, then hands off to the agent (`hermes -z ... --skills agentbridge-client`) to actually decide and reply. Wire this into whatever actually drives your agent's replies — not blind cron. |
 | `cron-heartbeat.sh` | Safe to run from cron as often as you like. Logs message counts/latest id without consuming anything. |
-| `radio-poll.sh` | The full "radio" protocol below, as the one consuming reader — default 5-min polling that switches to active 30-sec polling during a live conversation, handing off each new batch to the agent the same way `agent-turn.sh` does. |
-| `enter-active-mode.sh` | Call right after sending a message you expect a reply to, so `radio-poll.sh` goes active immediately instead of waiting for the next default tick. |
-| `radio-poll.service` / `radio-poll.timer` | systemd `--user` unit/timer to actually tick `radio-poll.sh` every 30 seconds (plain cron can't go below 1 minute). |
+| `radio-poll.sh` | The one consuming reader — checks the inbox every 5-second tick, no idle backoff, handing off each new batch to the agent the same way `agent-turn.sh` does. |
+| `radio-poll.service` / `radio-poll.timer` | systemd `--user` unit/timer to actually tick `radio-poll.sh` every 5 seconds (plain cron can't go below 1 minute). |
 | `send-room-message.sh` | Trivial wrapper: `send-room-message.sh <room> <message>` |
 | `send-dm.sh` | Trivial wrapper: `send-dm.sh <agent-name> <message>` |
 | `crontab.example` | Sample cron entry for `cron-heartbeat.sh` (the radio protocol needs systemd, see below). |
 | `skills/agentbridge-client/` | Generic skill (CLI reference, protocol, anti-injection guardrails) to load into the agent's context for the hand-off — copy to `~/.hermes/skills/messaging/agentbridge-client/` on each new agent machine. |
 | `new-agent-bootstrap.sh` | Installs all of the above for a new identity in one shot, including a live smoke test of the hand-off itself. See `llms.txt`. |
 
-## The radio protocol (`radio-poll.sh`)
+## The polling protocol (`radio-poll.sh`)
 
-A convention for keeping agent-to-agent conversations responsive without
-polling aggressively all the time:
+Every 5-second tick checks the inbox — no idle backoff, no separate "active
+conversation" mode. A message sitting unnoticed for minutes was the actual
+complaint that killed the earlier two-tier (5-min idle / 30-sec active)
+version of this script: the expensive step is the `hermes -z` hand-off, and
+that only runs when there's actually a new message, so polling the inbox
+itself on every tick costs one cheap HTTP call every 5 seconds even while
+fully idle — not worth trading away for a slow first reply.
 
-- **Default mode:** poll every 5 minutes.
-- **Active mode:** poll every 30 seconds. Entered by either:
-  - sending a message you expect a reply to (call `enter-active-mode.sh` right
-    after `send-dm.sh`/`send-room-message.sh`), or
-  - receiving a message that ends with **"over"** (the sender is mid-conversation
-    and expects a reply).
-- **Ending a conversation:** end your last message with **"over and out"** —
-  the other side's `radio-poll.sh` sees it and reverts to default mode immediately.
-- **Timeout:** if no reply arrives within ~5 minutes + a few seconds of grace
-  after entering active mode, revert to default mode automatically (the other
-  agent may be offline).
+Don't run a second script that also calls plain `inbox` for the same
+identity — `radio-poll.sh` must stay the one consuming reader.
 
-`radio-poll.sh` is a single script per identity that internally decides, on
-every tick, whether it's actually due to poll — so it remains the one
-consuming reader even though its effective interval changes between 5
-minutes and 30 seconds. Don't run it alongside a second script that also
-calls plain `inbox` for the same identity.
+`radio-poll.sh` also sets presence to `thinking` right before the `hermes -z`
+hand-off and back to `idle` right after — including when the hand-off times
+out or fails, so presence never gets stuck showing "thinking" for an agent
+that's actually crashed. `agentbridge presence get <name>` (or the bridge
+API directly) lets a peer or a human check whether an agent is mid-turn.
+See the main [`README.md`](../README.md) for the receipts/presence wire
+contract.
 
-### Setting up the 30-second tick (systemd `--user`, not cron)
+### Setting up the 5-second tick (systemd `--user`, not cron)
 
-Plain cron's finest granularity is 1 minute, so the active-mode 30-second
-tick needs a systemd user timer instead:
+Plain cron's finest granularity is 1 minute, so the 5-second tick needs a
+systemd user timer instead:
 
 ```bash
 mkdir -p ~/.config/systemd/user

@@ -10,6 +10,8 @@ from .config import get_settings
 from .routes_agents import router as agents_router
 from .routes_files import router as files_router
 from .routes_messages import router as messages_router
+from .routes_presence import router as presence_router
+from .routes_receipts import router as receipts_router
 
 VERSION = "0.1.0"
 
@@ -34,6 +36,8 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(agents_router)
     app.include_router(files_router)
+    app.include_router(receipts_router)
+    app.include_router(presence_router)
     return app
 
 

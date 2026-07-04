@@ -34,7 +34,7 @@ fi
 
 # 1) Wrappers
 cp "$AGENTBRIDGE_REPO/examples/"send-dm.sh "$AGENTBRIDGE_REPO/examples/"send-room-message.sh \
-   "$AGENTBRIDGE_REPO/examples/"enter-active-mode.sh "$AGENTBRIDGE_REPO/examples/"radio-poll.sh \
+   "$AGENTBRIDGE_REPO/examples/"radio-poll.sh \
    "$AGENTBRIDGE_REPO/examples/"cron-heartbeat.sh "$AGENTBRIDGE_REPO/examples/"agent-turn.sh \
    "$BRIDGE_BIN/"
 chmod +x "$BRIDGE_BIN"/*.sh
@@ -43,10 +43,7 @@ chmod +x "$BRIDGE_BIN"/*.sh
 cp "$AGENTBRIDGE_REPO/examples/"radio-poll.service "$AGENTBRIDGE_REPO/examples/"radio-poll.timer "$SYSTEMD_USER/"
 sed -i "s|ExecStart=.*|ExecStart=$AGENTBRIDGE_REPO/examples/radio-poll.sh|" "$SYSTEMD_USER/radio-poll.service"
 
-# 3) state file
-date +%s > "$BRIDGE_STATE/${AGENT_NAME}-active-since"
-
-# 4) ping
+# 3) ping
 if [ -f "$HOME/.hermes-bridge/.env" ]; then
   # shellcheck disable=SC1090
   source "$HOME/.hermes-bridge/.env"
@@ -63,22 +60,21 @@ fi
 AGENTBRIDGE_BIN="${AGENTBRIDGE_BIN:-$HOME/.hermes-bridge-venv/bin/agentbridge}"
 "$AGENTBRIDGE_BIN" ping
 
-# 5) systemd
+# 4) systemd
 systemctl --user daemon-reload
 systemctl --user enable --now radio-poll.timer
 loginctl enable-linger "$USER" >/dev/null 2>&1 || true
 
-# 6) hand-off smoke test — proves the LLM invocation radio-poll.sh depends on
+# 5) hand-off smoke test — proves the LLM invocation radio-poll.sh depends on
 # actually works on this machine, not just that the timer is ticking.
 HANDOFF_OK="no"
 if timeout 60 hermes -z "Reply with exactly the word: pong" -t terminal --skills agentbridge-client 2>/dev/null | grep -qi pong; then
   HANDOFF_OK="yes"
 fi
 
-# 7) summary
+# 6) summary
 echo "--- VERIFICATION SUMMARY ---"
 echo "AGENT_NAME=$AGENT_NAME"
-echo "STATE_FILE=$BRIDGE_STATE/${AGENT_NAME}-active-since"
 echo "DID_PING=$( "$AGENTBRIDGE_BIN" ping 2>&1 | head -1 )"
 echo "TIMER_STATUS=$(systemctl --user is-active radio-poll.timer 2>/dev/null || echo inactive)"
 echo "IDENTITIES=$( "$AGENTBRIDGE_BIN" agents 2>&1 )"

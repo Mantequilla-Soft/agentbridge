@@ -111,6 +111,11 @@ def inbox(
     cursor = 0 if all_messages else (since if since is not None else read_cursor(settings.agent_name))
     try:
         result = client.inbox(cursor, limit)
+        if use_auto_cursor and result["messages"]:
+            try:
+                client.mark_read([m["id"] for m in result["messages"]])
+            except Exception:
+                pass  # best-effort: a read receipt is a courtesy, not the critical path
     except Exception as e:
         client.close()
         raise _fail(e)
@@ -181,6 +186,73 @@ def agents(ctx: typer.Context, json_out: bool = typer.Option(False, "--json")) -
     else:
         for a in result["agents"]:
             typer.echo(a["name"])
+
+
+@app.command()
+def receipts(ctx: typer.Context, message_id: int, json_out: bool = typer.Option(False, "--json")) -> None:
+    """Show who has read a message, and when (non-consuming, safe to call anytime)."""
+    client = _get_client(ctx)
+    try:
+        result = client.message_receipts(message_id)
+    except Exception as e:
+        client.close()
+        raise _fail(e)
+    client.close()
+    if json_out:
+        typer.echo(json_mod.dumps(result, indent=2))
+        return
+    if not result["receipts"]:
+        typer.echo("(not read yet)")
+        return
+    for r in result["receipts"]:
+        typer.echo(f"read by {r['agent']} at {r['seen_at']}")
+
+
+presence_app = typer.Typer(help="Set or query agent presence status")
+app.add_typer(presence_app, name="presence")
+
+
+@presence_app.command("set")
+def presence_set(ctx: typer.Context, status_value: str, json_out: bool = typer.Option(False, "--json")) -> None:
+    """Set your own presence status (convention: idle, thinking, online, offline)."""
+    client = _get_client(ctx)
+    try:
+        result = client.set_presence(status_value)
+    except Exception as e:
+        client.close()
+        raise _fail(e)
+    client.close()
+    if json_out:
+        typer.echo(json_mod.dumps(result, indent=2))
+    else:
+        typer.echo(f"presence set to '{result['status']}'")
+
+
+@presence_app.command("get")
+def presence_get(
+    ctx: typer.Context,
+    agent_names: list[str] = typer.Argument(..., help="Agent name(s) to check"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Query one or more agents' current presence status."""
+    client = _get_client(ctx)
+    try:
+        result = client.get_presence(agent_names)
+    except Exception as e:
+        client.close()
+        raise _fail(e)
+    client.close()
+    if json_out:
+        typer.echo(json_mod.dumps(result, indent=2))
+        return
+    for p in result["presence"]:
+        if p["status"] is None:
+            display = "unknown"
+        elif p["stale"]:
+            display = f"{p['status']} (stale)"
+        else:
+            display = p["status"]
+        typer.echo(f"{p['agent']}: {display}")
 
 
 @app.command()

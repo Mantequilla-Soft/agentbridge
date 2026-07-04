@@ -13,6 +13,7 @@ class ServerSettings(BaseSettings):
     db_path: Path | None = None
     max_upload_mb: int = 200
     log_level: str = "info"
+    presence_ttl_seconds: int = 90
 
     @property
     def resolved_files_dir(self) -> Path:

@@ -84,6 +84,19 @@ class BridgeClient:
     def agents(self) -> dict:
         return self._handle(self._client.get("/v1/agents")).json()
 
+    def mark_read(self, message_ids: list[int]) -> dict:
+        return self._handle(self._client.post("/v1/receipts", json={"message_ids": message_ids})).json()
+
+    def message_receipts(self, message_id: int) -> dict:
+        return self._handle(self._client.get(f"/v1/messages/{message_id}/receipts")).json()
+
+    def set_presence(self, status_value: str) -> dict:
+        return self._handle(self._client.put("/v1/presence", json={"status": status_value})).json()
+
+    def get_presence(self, agent_names: list[str]) -> dict:
+        params = {"agents": ",".join(agent_names)}
+        return self._handle(self._client.get("/v1/presence", params=params)).json()
+
     def upload(self, path: Path) -> dict:
         with path.open("rb") as f:
             resp = self._client.post("/v1/files", files={"file": (path.name, f)})

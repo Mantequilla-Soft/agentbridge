@@ -46,6 +46,39 @@ class AgentsResponse(BaseModel):
     agents: list[AgentOut]
 
 
+class ReceiptsRequest(BaseModel):
+    message_ids: list[int]
+
+
+class MarkReadResponse(BaseModel):
+    marked: int
+
+
+class ReceiptOut(BaseModel):
+    agent: str
+    seen_at: str
+
+
+class MessageReceiptsResponse(BaseModel):
+    message_id: int
+    receipts: list[ReceiptOut]
+
+
+class PresenceSet(BaseModel):
+    status: str
+
+
+class PresenceOut(BaseModel):
+    agent: str
+    status: Optional[str] = None
+    updated_at: Optional[str] = None
+    stale: bool
+
+
+class PresenceResponse(BaseModel):
+    presence: list[PresenceOut]
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str

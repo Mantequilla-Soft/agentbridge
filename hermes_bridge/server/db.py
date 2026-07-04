@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_target ON messages(target_type, target, id);
+
+CREATE TABLE IF NOT EXISTS receipts (
+    message_id  INTEGER NOT NULL REFERENCES messages(id),
+    agent_id    INTEGER NOT NULL REFERENCES agents(id),
+    seen_at     TEXT NOT NULL,
+    PRIMARY KEY (message_id, agent_id)
+);
+
+CREATE TABLE IF NOT EXISTS presence (
+    agent_id    INTEGER PRIMARY KEY REFERENCES agents(id),
+    status      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 # Fragment shared by inbox lookup and file-access checks: rows visible to :name/:id
@@ -155,6 +168,85 @@ def get_inbox(
     """
     return conn.execute(
         query, {"since": since, "limit": limit, "agent_id": agent_id, "agent_name": agent_name}
+    ).fetchall()
+
+
+def can_access_message(
+    conn: sqlite3.Connection, *, agent_id: int, agent_name: str, message_id: int
+) -> sqlite3.Row | None:
+    query = f"""
+        SELECT m.* FROM messages m
+        WHERE m.id = :message_id AND {_VISIBILITY_SQL}
+    """
+    return conn.execute(
+        query, {"message_id": message_id, "agent_id": agent_id, "agent_name": agent_name}
+    ).fetchone()
+
+
+# --- receipts -----------------------------------------------------------------
+
+def mark_read(
+    conn: sqlite3.Connection, *, agent_id: int, agent_name: str, message_ids: list[int]
+) -> int:
+    """Record `agent_id` as having read each message id it can actually see. Silently
+    ignores ids that don't exist or aren't visible to this agent, rather than erroring —
+    a caller passing a stale or foreign id shouldn't blow up the whole batch."""
+    if not message_ids:
+        return 0
+    id_params = {f"id{i}": mid for i, mid in enumerate(message_ids)}
+    placeholders = ",".join(f":{k}" for k in id_params)
+    query = f"""
+        SELECT m.id FROM messages m
+        WHERE m.id IN ({placeholders}) AND {_VISIBILITY_SQL}
+    """
+    params = {**id_params, "agent_id": agent_id, "agent_name": agent_name}
+    visible_ids = [row["id"] for row in conn.execute(query, params).fetchall()]
+    seen_at = now_iso()
+    conn.executemany(
+        "INSERT OR IGNORE INTO receipts (message_id, agent_id, seen_at) VALUES (?, ?, ?)",
+        [(mid, agent_id, seen_at) for mid in visible_ids],
+    )
+    conn.commit()
+    return len(visible_ids)
+
+
+def get_receipts(conn: sqlite3.Connection, *, message_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT r.seen_at, a.name AS agent_name FROM receipts r
+        JOIN agents a ON a.id = r.agent_id
+        WHERE r.message_id = ?
+        ORDER BY r.seen_at ASC
+        """,
+        (message_id,),
+    ).fetchall()
+
+
+# --- presence -----------------------------------------------------------------
+
+def set_presence(conn: sqlite3.Connection, *, agent_id: int, status_value: str) -> sqlite3.Row:
+    conn.execute(
+        "INSERT INTO presence (agent_id, status, updated_at) VALUES (:agent_id, :status, :updated_at) "
+        "ON CONFLICT(agent_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at",
+        {"agent_id": agent_id, "status": status_value, "updated_at": now_iso()},
+    )
+    conn.commit()
+    return conn.execute("SELECT * FROM presence WHERE agent_id = ?", (agent_id,)).fetchone()
+
+
+def get_presence(conn: sqlite3.Connection, *, agent_names: list[str]) -> list[sqlite3.Row]:
+    """One row per requested name, via LEFT JOIN, so an agent with no presence set yet
+    still appears (with status/updated_at NULL) instead of being silently dropped."""
+    if not agent_names:
+        return []
+    placeholders = ",".join("?" * len(agent_names))
+    return conn.execute(
+        f"""
+        SELECT a.name AS agent_name, p.status, p.updated_at
+        FROM agents a LEFT JOIN presence p ON p.agent_id = a.id
+        WHERE a.name IN ({placeholders})
+        """,
+        agent_names,
     ).fetchall()
 
 
