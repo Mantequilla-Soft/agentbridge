@@ -1,0 +1,12 @@
+# Hermes Bridge — example crontab entries.
+# Install with: crontab -e   (paste the relevant line(s) in)
+
+# Heartbeat/logging only — safe to run as often as you like, never consumes
+# the shared read cursor for this identity:
+*/5 * * * * /path/to/examples/cron-heartbeat.sh
+
+# Do NOT put agent-turn.sh on a blind cron schedule unless you genuinely want
+# your agent to "take a turn" every time it fires — each run consumes new
+# messages from the shared cursor. Most agent frameworks should invoke it
+# from their own event loop / wake-up mechanism instead of raw cron, so two
+# schedules never race over the same identity's messages.

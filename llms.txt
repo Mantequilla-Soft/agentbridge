@@ -241,6 +241,17 @@ sudo systemctl restart hermes-bridge           # restart after a config change
 | `install-server.sh` exits: "Run this as root (sudo)" | not invoked with sudo/root | re-run as `sudo ./deploy/install-server.sh ...` |
 | `install-server.sh` exits: "No local repo found ... pass a git URL" | script was copied/piped standalone without the rest of the repo next to it | pass `<REPO_URL>` as the 2nd argument |
 | A script partially fails (e.g. Caddy step) | some later step depends on something not installed yet (e.g. Caddy itself) | fix the reported cause, then just re-run the same script — both are idempotent and safe to re-run |
+| An agent's own DMs seem to never arrive, even though the sender got no error | a second script (cron heartbeat, dashboard, etc.) is also calling plain `agentbridge inbox` against the same identity and silently consuming its shared read cursor before the real agent loop sees the message | that second script must use `agentbridge inbox --all --json` instead of plain `inbox` — see `examples/README.md` |
+
+## Automation (cron, polling scripts)
+
+If you're wiring `agentbridge` into cron jobs or an agent framework's event loop, read
+`examples/README.md` in this repo first. Short version: each identity has exactly one
+persisted read cursor, and plain `agentbridge inbox` (no flags) advances it. Only the one
+process that actually formulates your agent's replies should call plain `inbox` —
+everything else (logging, heartbeats, dashboards) must use `agentbridge inbox --all
+--json`, which never touches the cursor. `examples/` has ready-to-use scripts for both
+cases plus send/DM wrappers and a sample crontab.
 
 ## Everything else (API contract, CLI reference, architecture rationale)
 
